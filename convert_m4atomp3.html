@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>m4a chuyển mp3 (cục bộ)</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; max-width: 500px; margin: 0 auto; }
+    button, input { display: block; width: 100%; padding: 12px; margin: 10px 0; font-size: 16px; box-sizing: border-box; }
+    button { background: #4CAF50; color: white; border: none; border-radius: 8px; }
+    button:disabled { background: #ccc; }
+    #status { color: #666; font-size: 14px; word-break: break-all; }
+    #downloadLink { display: none; text-align: center; background: #2196F3; color: white; padding: 12px; border-radius: 8px; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <h2>m4a → mp3</h2>
+  <p style="font-size:13px;color:#999;">Xử lý cục bộ trong trình duyệt, file không tải lên máy chủ.</p>
+
+  <input type="file" id="fileInput" accept=".m4a,audio/mp4,audio/m4a">
+  <button id="convertBtn" disabled>Bắt đầu chuyển đổi</button>
+  <p id="status">Đang tải engine ffmpeg (~30MB), vui lòng đợi...</p>
+  <a id="downloadLink" download="output.mp3">Tải xuống MP3</a>
+
+  <script type="module">
+    import { FFmpeg } from 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js';
+    import { fetchFile, toBlobURL } from 'https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/esm/index.js';
+
+    const ffmpeg = new FFmpeg();
+    const fileInput = document.getElementById('fileInput');
+    const convertBtn = document.getElementById('convertBtn');
+    const status = document.getElementById('status');
+    const downloadLink = document.getElementById('downloadLink');
+
+    // Tải engine ffmpeg.wasm
+    async function loadFFmpeg() {
+      const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm';
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+      });
+      status.textContent = 'Engine đã sẵn sàng. Vui lòng chọn file m4a.';
+      convertBtn.disabled = false;
+    }
+
+    loadFFmpeg().catch(err => {
+      status.textContent = 'Tải engine thất bại: ' + err.message;
+    });
+
+    // Chọn file
+    let selectedFile = null;
+    fileInput.addEventListener('change', (e) => {
+      selectedFile = e.target.files[0];
+      if (selectedFile) {
+        status.textContent = `Đã chọn: ${selectedFile.name} (${(selectedFile.size / 1024 / 1024).toFixed(1)} MB)`;
+        downloadLink.style.display = 'none';
+      }
+    });
+
+    // Chuyển đổi
+    convertBtn.addEventListener('click', async () => {
+      if (!selectedFile) return;
+
+      convertBtn.disabled = true;
+      status.textContent = 'Đang chuyển đổi...';
+
+      try {
+        // Ghi file vào hệ thống file ảo
+        await ffmpeg.writeFile('input.m4a', await fetchFile(selectedFile));
+
+        // Thực thi lệnh chuyển đổi
+        await ffmpeg.exec(['-i', 'input.m4a', '-vn', '-c:a', 'libmp3lame', '-b:a', '192k', 'output.mp3']);
+
+        // Đọc kết quả
+        const data = await ffmpeg.readFile('output.mp3');
+        const blob = new Blob([data.buffer], { type: 'audio/mp3' });
+        const url = URL.createObjectURL(blob);
+
+        downloadLink.href = url;
+        downloadLink.download = selectedFile.name.replace(/\.m4a$/i, '') + '.mp3';
+        downloadLink.style.display = 'block';
+        status.textContent = 'Chuyển đổi hoàn tất! Nhấn nút bên dưới để tải xuống.';
+
+        // Dọn dẹp file tạm trong bộ nhớ ảo
+        await ffmpeg.deleteFile('input.m4a');
+        await ffmpeg.deleteFile('output.mp3');
+      } catch (err) {
+        status.textContent = 'Chuyển đổi thất bại: ' + err.message;
+      }
+
+      convertBtn.disabled = false;
+    });
+  </script>
+</body>
+</html>
